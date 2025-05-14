@@ -7,7 +7,7 @@ from qwen3mcp.mcp_template import system_content, code_functions, FN_STOP_WORDS
 class Chat:
     def __init__(self, base_url, api_key=None):
         if api_key is None:
-            api_key = os.environ["API_KEY"]
+            api_key = os.environ["QWEN_API_KEY"]
         self.api_key = api_key
 
         self.base_url = base_url
@@ -19,9 +19,9 @@ class Chat:
         }
 
         self.data_template = {
-            "model": "Qwen/Qwen3-32B",
+            "model": "qwen3-32b",
             "messages": None,
-            "stream": False,
+            "stream": True,
             "max_tokens": 8192,
             "enable_thinking": True,
             "thinking_budget": 4096,
@@ -38,7 +38,7 @@ class Chat:
     def chat(
         self,
         prompt,
-        model="Qwen/Qwen3-32B",
+        model="qwen3-32b",
     ):
         template = self.data_template.copy()
         template["model"] = model
@@ -53,6 +53,7 @@ class Chat:
             json=template,
             headers=self.headers,
         )
+        print(response.text)
         dic = response.json()
 
         content = dic["choices"][0]["message"]["content"]
@@ -63,7 +64,7 @@ class Chat:
 prompt = "请调用python计算一下$\\sin(\\pi/3)$."
 
 if __name__ == "__main__":
-    base_url = "https://api.siliconflow.cn/v1"
+    base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     chat = Chat(base_url=base_url)
     ret = chat.chat(prompt)
     print(ret)
