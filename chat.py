@@ -1,70 +1,92 @@
 import os
-import requests
+import simplejson as json
+from transformers import AutoTokenizer
+from pprint import pprint
+from openai import OpenAI
+from qwen3fncall.fncall_template import (
+    format_system,
+    code_functions,
+    example_functions,
+    example_map,
+)
 
-from qwen3mcp.mcp_template import system_content, code_functions, FN_STOP_WORDS
+sys_prompt = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
 
 
-class Chat:
-    def __init__(self, base_url, api_key=None):
-        if api_key is None:
-            api_key = os.environ["QWEN_API_KEY"]
-        self.api_key = api_key
-
-        self.base_url = base_url
-        self.chat_url = os.path.join(base_url, "chat/completions")
-
-        self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        self.data_template = {
-            "model": "qwen3-32b",
-            "messages": None,
-            "stream": True,
-            "max_tokens": 8192,
-            "enable_thinking": True,
-            "thinking_budget": 4096,
-            "min_p": 0.05,
-            "stop": FN_STOP_WORDS,
-            "temperature": 0.7,
-            "top_p": 0.7,
-            "top_k": 50,
-            "frequency_penalty": 0.5,
-            "n": 1,
-            "response_format": {"type": "text"},
-        }
-
-    def chat(
+class Qwen3Agent:
+    def __init__(
         self,
-        prompt,
-        model="qwen3-32b",
+        base_url,
+        api_key,
+        functions,
+        function_map,
     ):
-        template = self.data_template.copy()
-        template["model"] = model
-        template["messages"] = [
-            {"role": "system", "content": system_content(code_functions)},
+        self.client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+        )
+        self.functions = functions
+        self.sys_prompt = (
+            "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
+        ) + format_system(functions)
+        self.function_map = function_map
+
+    def chat(self, messages, model="qwen3-4b"):
+        while True:
+            self._chat(messages, model)
+            if len(messages[-1].get("tool_calls", [])) == 0:
+                break
+            tool_results = []
+            for tc in messages[-1]["tool_calls"]:
+                # FIXME: 这里和vLLM的Hermes解析器有关, 解析器会先读取
+                # <tool_call></tool_call>内的片段, 然后用json库解析成dict,
+                # 而后封装时又把parameter对应的值dump成字符串, 解析器的这种
+                # 写法很坑, 因为这样得到的parameters不是dict, 同时又无法解
+                # 析code interpreter, 如果要支持code interpreter得该解析器
+                kargs = json.loads(tc["function"]["arguments"])
+                result = self.function_map[tc["function"]["name"]](**kargs)
+                tool_results.append(
+                    {
+                        "role": "tool",
+                        "content": str(result),
+                        "tool_call_id": tc["id"],
+                    }
+                )
+            messages.extend(tool_results)
+
+    def _chat(self, messages, model="qwen3-4b"):
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=[{"type": "function", "function": item} for item in self.functions],
+        )
+        messages.append(response.choices[0].message.to_dict())
+        return messages
+
+    def init_messages(self, prompt):
+        return [
+            {"role": "system", "content": self.sys_prompt},
             {"role": "user", "content": prompt},
         ]
 
-        response = requests.request(
-            "POST",
-            self.chat_url,
-            json=template,
-            headers=self.headers,
-        )
-        print(response.text)
-        dic = response.json()
-
-        content = dic["choices"][0]["message"]["content"]
-        reasoning_content = dic["choices"][0]["message"]["reasoning_content"]
-        return f"<think>{reasoning_content}</think>\n\n{content}"
-
-
-prompt = "请调用python计算一下$\\sin(\\pi/3)$."
 
 if __name__ == "__main__":
-    base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    chat = Chat(base_url=base_url)
-    ret = chat.chat(prompt)
-    print(ret)
+    qwen3agent = Qwen3Agent(
+        "http://localhost:11451/v1",
+        "EMPTY",
+        example_functions,
+        example_map,
+    )
+
+    messages = qwen3agent.init_messages(
+        "Tell me today's temperature and weather of Shang Hai."
+    )
+    qwen3agent.chat(messages, "qwen3-4b")
+    tokenizer = AutoTokenizer.from_pretrained("../../models/Qwen3-4B/")
+    res = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=False,
+        enable_thinking=True,
+    )
+    print(res)
