@@ -81,12 +81,13 @@ if __name__ == "__main__":
     messages = qwen3agent.init_messages(
         "Tell me today's temperature and weather of Shang Hai."
     )
-    qwen3agent.chat(messages, "qwen3-4b")
-    tokenizer = AutoTokenizer.from_pretrained("../../models/Qwen3-4B/")
-    res = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=False,
-        enable_thinking=True,
-    )
-    print(res)
+    qwen3agent.chat(messages, "Qwen3-32B")
+    print(messages)
+#    tokenizer = AutoTokenizer.from_pretrained("../../models/Qwen3-4B/")
+#    res = tokenizer.apply_chat_template(
+#        messages,
+#        tokenize=False,
+#        add_generation_prompt=False,
+#        enable_thinking=True,
+#    )
+#    print(res)
